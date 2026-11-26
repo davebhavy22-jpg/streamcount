@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StreamCount — Counting unique visitors with probabilistic estimation</title>
+<meta name="description" content="StreamCount demonstrates HyperLogLog, a probabilistic algorithm that estimates unique visitors using compact registers instead of storing every visitor ID.">
+<style>
+  :root{
+    --bg:#F7F8FA;
+    --surface:#FFFFFF;
+    --surface-2:#F1F4F8;
+    --text:#182230;
+    --text-2:#475467;
+    --text-3:#667085;
+    --primary:#4169A1;
+    --primary-dark:#2F4F7A;
+    --primary-light:#EAF0F7;
+    --teal:#3C8D86;
+    --teal-light:#E6F2F0;
+    --border:#E2E8F0;
+    --border-strong:#D0D7E2;
+    --green:#2E7D5B;
+    --green-bg:#EAF5EE;
+    --amber:#9A6B1A;
+    --amber-bg:#FEF6E0;
+    --red:#B42318;
+    --red-bg:#FEF3F2;
+    --radius:10px;
+    --radius-sm:8px;
+    --shadow:0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+    --shadow-md:0 4px 12px rgba(16,24,40,.07);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth;scroll-padding-top:76px}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    background:var(--bg);color:var(--text);line-height:1.55;
+    -webkit-font-smoothing:antialiased;font-size:15px;
+  }
+  a{color:var(--primary);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+
+  /* ---------- Header ---------- */
+  header{
+    position:sticky;top:0;z-index:50;background:rgba(255,255,255,.96);
+    border-bottom:1px solid var(--border);backdrop-filter:blur(6px);
+  }
+  .header-inner{display:flex;align-items:center;justify-content:space-between;gap:16px;height:60px}
+  .brand{display:flex;align-items:center;gap:10px;min-width:0}
+  .brand-mark{
+    width:34px;height:34px;border-radius:8px;background:var(--primary);
+    display:flex;align-items:flex-end;justify-content:center;gap:3px;padding:7px 8px;flex-shrink:0;
+  }
+  .brand-mark span{display:block;width:5px;border-radius:2px 2px 0 0;background:#fff}
+  .brand-mark span:nth-child(1){height:8px;opacity:.75}
+  .brand-mark span:nth-child(2){height:14px;opacity:.9}
+  .brand-mark span:nth-child(3){height:20px}
+  .brand-text{line-height:1.15}
+  .brand-name{font-weight:700;font-size:17px;letter-spacing:-.02em;color:var(--text)}
+  .brand-tag{font-size:12px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  nav{display:flex;align-items:center;gap:4px}
+  nav a{
+    color:var(--text-2);font-size:13.5px;font-weight:500;padding:7px 11px;border-radius:7px;
+  }
+  nav a:hover{background:var(--surface-2);text-decoration:none;color:var(--text)}
+  .badge{
+    font-size:11px;font-weight:600;letter-spacing:.02em;color:var(--primary-dark);
+    background:var(--primary-light);border:1px solid #D3E0EF;padding:5px 9px;border-radius:999px;white-space:nowrap;
+  }
+  @media(max-width:820px){
+    .brand-tag{display:none}
+    nav a{padding:6px 8px;font-size:13px}
+    .badge{display:none}
+  }
+  @media(max-width:560px){
+    nav a:nth-child(1){display:none}
+  }
+
+  /* ---------- Hero ---------- */
+  .hero{padding:44px 0 26px}
+  .hero-grid{display:grid;grid-template-columns:1.35fr .85fr;gap:28px;align-items:start}
+  @media(max-width:860px){.hero-grid{grid-template-columns:1fr}}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--teal);margin-bottom:12px;
+  }
+  .eyebrow::before{content:"";width:22px;height:2px;background:var(--teal);border-radius:2px}
+  h1{font-size:34px;line-height:1.15;letter-spacing:-.03em;font-weight:750;margin-bottom:12px}
+  h1 .accent{color:var(--primary)}
+  .hero p.lead{font-size:16.5px;color:var(--text-2);max-width:620px}
+  .hero p.lead strong{color:var(--text);font-weight:650}
+  .hero-actions{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:600;
+    padding:10px 18px;border-radius:8px;border:1px solid transparent;cursor:pointer;
+    transition:background .15s,border-color .15s,transform .05s;
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{background:var(--primary);color:#fff}
+  .btn-primary:hover{background:var(--primary-dark)}
+  .btn-secondary{background:#fff;color:var(--text);border-color:var(--border-strong)}
+  .btn-secondary:hover{background:var(--surface-2)}
+  .btn:focus-visible, nav a:focus-visible, input:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+  .hero-note{font-size:12.5px;color:var(--text-3);margin-top:12px}
+
+  .stat-card{
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    box-shadow:var(--shadow);overflow:hidden;
+  }
+  .stat-card-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+  .stat-card-head h2{font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-2)}
+  .stat-card-head span{font-size:12px;color:var(--text-3)}
+  .stat-rows{display:grid}
+  .stat-row{display:flex;justify-content:space-between;align-items:center;padding:13px 18px;border-bottom:1px solid var(--border)}
+  .stat-row:last-child{border-bottom:none}
+  .stat-row .k{font-size:13.5px;color:var(--text-2)}
+  .stat-row .v{font-size:15px;font-weight:700;color:var(--text);text-align:right}
+  .stat-row .v small{display:block;font-size:11.5px;font-weight:500;color:var(--text-3)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* ---------- Sections ---------- */
+  section{padding:26px 0}
+  .section-head{margin-bottom:16px}
+  .section-head h2{font-size:22px;letter-spacing:-.02em;font-weight:750}
+  .section-head p{color:var(--text-2);font-size:14.5px;max-width:760px;margin-top:4px}
+  .section-num{
+    display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--primary);background:var(--primary-light);padding:3px 8px;border-radius:999px;margin-bottom:8px;
+  }
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+
+  /* ---------- Simulator ---------- */
+  .sim-layout{display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start}
+  @media(max-width:900px){.sim-layout{grid-template-columns:1fr}}
+  .controls{padding:18px}
+  .controls h3{font-size:14px;font-weight:700;margin-bottom:4px}
+  .controls .sub{font-size:12.5px;color:var(--text-3);margin-bottom:16px}
+  .field{margin-bottom:18px}
+  .field label{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px}
+  .field label output{font-size:13px;font-weight:700;color:var(--primary);font-variant-numeric:tabular-nums}
+  .field .hint{font-size:12px;color:var(--text-3);margin-top:5px}
+  input[type="range"]{width:100%;accent-color:var(--primary);height:28px;cursor:pointer}
+  .number-row{display:flex;gap:8px}
+  .number-row input[type="number"]{
+    flex:1;min-width:0;padding:9px 10px;border:1px solid var(--border-strong);border-radius:8px;
+    font-size:14px;font-variant-numeric:tabular-nums;color:var(--text);background:#fff;
+  }
+  .presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+  .preset{
+    font-size:12px;font-weight:600;padding:6px 10px;border-radius:999px;border:1px solid var(--border-strong);
+    background:#fff;color:var(--text-2);cursor:pointer;
+  }
+  .preset:hover{background:var(--surface-2);color:var(--text)}
+  .preset.active{background:var(--primary-light);border-color:#B9CCE3;color:var(--primary-dark)}
+  .run-btn{width:100%;justify-content:center;padding:12px;font-size:15px}
+  .run-meta{font-size:12px;color:var(--text-3);text-align:center;margin-top:10px}
+  .error-box{
+    display:none;margin-top:12px;padding:10px 12px;border-radius:8px;font-size:13px;
+    background:var(--red-bg);border:1px solid #FECDCA;color:var(--red);
+  }
+  .error-box.show{display:block}
+  .ok-box{
+    display:none;margin-top:12px;padding:10px 12px;border-radius:8px;font-size:13px;
+    background:var(--green-bg);border:1px solid #A6D8B8;color:var(--green);
+  }
+  .ok-box.show{display:block}
+
+  .metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border-bottom:1px solid var(--border)}
+  @media(max-width:900px){.metrics{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:480px){.metrics{grid-template-columns:1fr 1fr}}
+  .metric{padding:16px 16px 14px;border-right:1px solid var(--border)}
+  .metric:last-child{border-right:none}
+  @media(max-width:900px){.metric{border-bottom:1px solid var(--border)}}
+  .metric .label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px}
+  .metric .value{font-size:26px;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+  .metric .value small{font-size:13px;font-weight:600;color:var(--text-3)}
+  .metric .detail{font-size:12px;color:var(--text-3);margin-top:4px}
+  .metric.highlight{background:linear-gradient(180deg,#F4F8FC, #fff)}
+  .metric.highlight .value{color:var(--primary-dark)}
+  .error-good{color:var(--green)!important}
+  .error-warn{color:var(--amber)!important}
+
+  .sim-body{padding:16px 18px}
+  .sim-body h4{font-size:13px;font-weight:700;margin-bottom:8px}
+  .stream-preview{
+    display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;
+  }
+  .chip{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;
+    padding:4px 8px;border-radius:6px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-2);
+  }
+  .chip.repeat{background:var(--teal-light);border-color:#BFE0DB;color:#25635E}
+  .sim-note{font-size:12.5px;color:var(--text-3)}
+  .sim-note code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;background:var(--surface-2);padding:1px 5px;border-radius:4px}
+
+  /* ---------- Registers ---------- */
+  .reg-layout{display:grid;grid-template-columns:1fr 300px;gap:18px;align-items:start}
+  @media(max-width:900px){.reg-layout{grid-template-columns:1fr}}
+  .reg-card{padding:18px}
+  .reg-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .reg-head h3{font-size:15px;font-weight:700}
+  .reg-head p{font-size:12.5px;color:var(--text-3)}
+  .reg-grid{
+    display:grid;grid-template-columns:repeat(32,1fr);gap:2px;background:#fff;
+    border:1px solid var(--border);border-radius:8px;padding:8px;
+  }
+  .reg-cell{aspect-ratio:1;border-radius:2px;background:#EEF1F5;border:1px solid #E6EAF0;cursor:default}
+  .reg-cell:hover{outline:2px solid var(--primary);outline-offset:0}
+  .legend{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--text-2)}
+  .legend .swatches{display:flex;gap:3px}
+  .legend .sw{width:16px;height:16px;border-radius:3px;border:1px solid var(--border)}
+  .reg-stats{display:grid;gap:10px}
+  .reg-stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow)}
+  .reg-stat .k{font-size:12px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
+  .reg-stat .v{font-size:22px;font-weight:750;font-variant-numeric:tabular-nums;margin-top:2px}
+  .reg-stat .d{font-size:12px;color:var(--text-3)}
+  .reg-explain{padding:14px 16px;font-size:13.5px;color:var(--text-2);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+  .reg-explain strong{color:var(--text)}
+  .worked{
+    margin-top:12px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;
+    font-size:12.5px;color:var(--text-2);
+  }
+  .worked .mono{font-size:12px;word-break:break-all}
+
+  /* ---------- Steps ---------- */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  @media(max-width:820px){.steps{grid-template-columns:1fr}}
+  .step{
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:20px;box-shadow:var(--shadow);position:relative;
+  }
+  .step-num{
+    width:30px;height:30px;border-radius:50%;background:var(--primary);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;margin-bottom:12px;
+  }
+  .step:nth-child(2) .step-num{background:var(--teal)}
+  .step:nth-child(3) .step-num{background:var(--primary-dark)}
+  .step h3{font-size:16px;font-weight:700;margin-bottom:6px}
+  .step p{font-size:14px;color:var(--text-2)}
+  .step .diagram{
+    margin-top:14px;padding:10px 12px;background:var(--surface-2);border-radius:8px;border:1px solid var(--border);
+    font-size:12.5px;color:var(--text-2);
+  }
+  .step .diagram .mono{font-size:11.5px}
+  .arrow-note{text-align:center;color:var(--text-3);font-size:12px;margin-top:10px}
+
+  /* ---------- Probability ---------- */
+  .prob-layout{display:grid;grid-template-columns:1.1fr .9fr;gap:18px;align-items:start}
+  @media(max-width:860px){.prob-layout{grid-template-columns:1fr}}
+  .prob-card{padding:20px}
+  .prob-card h3{font-size:15px;font-weight:700;margin-bottom:10px}
+  .prob-card ul{list-style:none;display:grid;gap:10px}
+  .prob-card li{display:flex;gap:10px;font-size:14px;color:var(--text-2)}
+  .prob-card li::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--teal);margin-top:7px;flex-shrink:0}
+  .prob-card li strong{color:var(--text)}
+  .formula-panel{
+    background:#1E2E44;color:#E8EEF5;border-radius:var(--radius);padding:22px;box-shadow:var(--shadow-md);
+  }
+  .formula-panel .fp-label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#9FB3CC;margin-bottom:10px}
+  .formula{
+    font-family:Georgia,"Times New Roman",serif;font-size:30px;letter-spacing:.01em;margin:8px 0 12px;
+    display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  }
+  .formula .frac{display:inline-flex;flex-direction:column;align-items:center;vertical-align:middle;line-height:1.1}
+  .formula .frac .top{border-bottom:2px solid #E8EEF5;padding:0 10px 2px}
+  .formula .frac .bot{padding:2px 10px 0}
+  .formula-panel p{font-size:13.5px;color:#C7D2E0}
+  .formula-panel .fp-result{
+    margin-top:14px;padding:12px 14px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);
+    border-radius:8px;font-size:13.5px;
+  }
+  .formula-panel .fp-result strong{color:#fff;font-size:16px}
+  .formula-panel .fp-note{font-size:12px;color:#9FB3CC;margin-top:10px}
+
+  /* ---------- Results ---------- */
+  .results-layout{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+  @media(max-width:860px){.results-layout{grid-template-columns:1fr}}
+  .result-card{padding:20px}
+  .result-card h3{font-size:15px;font-weight:700;margin-bottom:14px}
+  .bar-row{margin-bottom:16px}
+  .bar-row .bar-label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px}
+  .bar-row .bar-label .bl-k{font-weight:600;color:var(--text-2)}
+  .bar-row .bar-label .bl-v{font-weight:700;font-variant-numeric:tabular-nums}
+  .bar-track{height:22px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+  .bar-fill{height:100%;border-radius:5px;transition:width .5s ease}
+  .bar-exact{background:var(--teal)}
+  .bar-est{background:var(--primary)}
+  .result-table{width:100%;border-collapse:collapse;font-size:13.5px}
+  .result-table th,.result-table td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--border)}
+  .result-table th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700}
+  .result-table td:last-child,.result-table th:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+  .result-table tr:last-child td{border-bottom:none}
+  .memory-compare{
+    margin-top:14px;padding:12px 14px;background:var(--green-bg);border:1px solid #A6D8B8;border-radius:8px;font-size:13px;color:#1F4D36;
+  }
+  .memory-compare strong{font-size:15px}
+
+  /* ---------- Limitations ---------- */
+  .limit-card{padding:20px;border-left:4px solid var(--amber)}
+  .limit-card h3{font-size:16px;font-weight:700;margin-bottom:10px}
+  .limit-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px 24px}
+  @media(max-width:700px){.limit-grid{grid-template-columns:1fr}}
+  .limit-grid li{list-style:none;display:flex;gap:9px;font-size:14px;color:var(--text-2)}
+  .limit-grid li::before{content:"—";color:var(--amber);font-weight:700;flex-shrink:0}
+
+  /* ---------- Footer ---------- */
+  footer{border-top:1px solid var(--border);background:#fff;margin-top:10px}
+  .footer-inner{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:22px 0;flex-wrap:wrap}
+  .footer-brand{font-weight:700;font-size:15px}
+  .footer-meta{font-size:13px;color:var(--text-3)}
+  .footer-note{font-size:12px;color:var(--text-3)}
+
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  @media print{
+    header{position:static}
+    .btn,.presets{display:none}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap header-inner">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="brand-text">
+        <div class="brand-name">StreamCount</div>
+        <div class="brand-tag">Counting unique visitors with probabilistic estimation.</div>
+      </div>
+    </div>
+    <nav aria-label="Sections">
+      <a href="#overview">Overview</a>
+      <a href="#simulator">Simulator</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#results">Results</a>
+    </nav>
+    <span class="badge">Probability &amp; Statistics Project</span>
+  </div>
+</header>
+
+<main>
+  <!-- 1. Hero / Overview -->
+  <div class="hero" id="overview">
+    <div class="wrap hero-grid">
+      <div>
+        <div class="eyebrow">Overview</div>
+        <h1>Count unique visitors.<br><span class="accent">Use less memory.</span></h1>
+        <p class="lead"><strong>StreamCount</strong> demonstrates <strong>HyperLogLog</strong>, a probabilistic algorithm that estimates the number of unique visitors using a compact set of registers instead of storing every visitor ID.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#simulator">Run the simulator ↓</a>
+          <a class="btn btn-secondary" href="#how-it-works">How it works</a>
+        </div>
+        <p class="hero-note">Live demo below — every number on this page is computed in your browser by the actual HyperLogLog implementation. No pre-filled or fabricated results.</p>
+      </div>
+      <div class="stat-card" aria-label="Project facts">
+        <div class="stat-card-head"><h2>Project facts</h2><span>m = 1,024 registers</span></div>
+        <div class="stat-rows">
+          <div class="stat-row"><span class="k">Algorithm</span><span class="v">HyperLogLog<small>probabilistic cardinality estimation</small></span></div>
+          <div class="stat-row"><span class="k">Registers</span><span class="v">1,024<small>2<sup>10</sup> registers (p = 10)</small></span></div>
+          <div class="stat-row"><span class="k">Register storage</span><span class="v">≈ 1 KB<small>1,024 bytes · 1 byte per register</small></span></div>
+          <div class="stat-row"><span class="k">Expected relative error</span><span class="v">≈ 3.25%<small>1.04 / √1024 (standard error)</small></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Simulator -->
+  <section id="simulator">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="section-num">Interactive demo</span>
+        <h2>Visitor simulator</h2>
+        <p>Generate a stream of visitor events with repeat visitors, then compare the exact unique count (stored in a set) with the HyperLogLog estimate. Change the settings and run again — the registers update every time.</p>
+      </div>
+
+      <div class="sim-layout">
+        <!-- Controls -->
+        <div class="card controls">
+          <h3>Simulation settings</h3>
+          <p class="sub">Defaults are set for a quick classroom demo.</p>
+
+          <div class="presets" role="group" aria-label="Presets">
+            <button class="preset" data-events="1000" data-repeat="40">Small · 1,000</button>
+            <button class="preset active" data-events="10000" data-repeat="40">Demo · 10,000</button>
+            <button class="preset" data-events="50000" data-repeat="40">Large · 50,000</button>
+            <button class="preset" data-events="100000" data-repeat="40">1,00,000</button>
+          </div>
+
+          <div class="field">
+            <label for="eventsRange">Total visitor events <output id="eventsOut">10,000</output></label>
+            <input type="range" id="eventsRange" min="100" max="100000" step="100" value="10000">
+            <div class="number-row" style="margin-top:8px">
+              <input type="number" id="eventsNumber" min="100" max="100000" step="100" value="10000" aria-label="Total visitor events (number)">
+              <span style="align-self:center;font-size:12px;color:var(--text-3)">events</span>
+            </div>
+            <p class="hint">Range: 100 – 100,000 events. Larger streams take a fraction of a second.</p>
+          </div>
+
+          <div class="field">
+            <label for="repeatRange">Repeat visitors <output id="repeatOut">40%</output></label>
+            <input type="range" id="repeatRange" min="0" max="90" step="5" value="40">
+            <p class="hint">Share of events that are returning visitors. At 40%, about 60% of events introduce a new unique visitor.</p>
+          </div>
+
+          <button class="btn btn-primary run-btn" id="runBtn">▶&nbsp; Run Simulation</button>
+          <p class="run-meta" id="runMeta">Ready. Click Run Simulation to generate a fresh stream.</p>
+          <div class="error-box" id="errorBox" role="alert"></div>
+          <div class="ok-box" id="okBox"></div>
+        </div>
+
+        <!-- Results dashboard -->
+        <div class="card">
+          <div class="metrics" aria-live="polite">
+            <div class="metric">
+              <div class="label">Total Events</div>
+              <div class="value" id="mTotal">—</div>
+              <div class="detail">events in stream</div>
+            </div>
+            <div class="metric">
+              <div class="label">Exact Unique Visitors</div>
+              <div class="value" id="mExact">—</div>
+              <div class="detail">counted with a set</div>
+            </div>
+            <div class="metric highlight">
+              <div class="label">Estimated Unique Visitors</div>
+              <div class="value" id="mEst">—</div>
+              <div class="detail">HyperLogLog estimate</div>
+            </div>
+            <div class="metric">
+              <div class="label">Relative Error</div>
+              <div class="value" id="mError">—</div>
+              <div class="detail">|estimate − exact| / exact</div>
+            </div>
+            <div class="metric">
+              <div class="label">Register Memory</div>
+              <div class="value" id="mMemory">—</div>
+              <div class="detail">1,024 registers × 1 byte</div>
+            </div>
+          </div>
+          <div class="sim-body">
+            <h4>Sample of the generated stream <span style="font-weight:500;color:var(--text-3)">(first 18 events — teal = repeat visitor)</span></h4>
+            <div class="stream-preview" id="streamPreview"><span class="sim-note">Run the simulation to see the stream.</span></div>
+            <p class="sim-note" id="simNote">The exact count uses a JavaScript <code>Set</code> of visitor IDs. The estimate uses only the 1,024 HyperLogLog registers — visitor IDs are hashed and never stored. Each run generates a new random stream, so the estimate will vary slightly.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Register visualization -->
+  <section id="registers">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="section-num">Inside the algorithm</span>
+        <h2>Register visualization</h2>
+        <p>All 1,024 actual registers from the last run, shown as a 32 × 32 grid. Darker cells hold larger values. Hover any cell to see its index and value.</p>
+      </div>
+
+      <div class="reg-layout">
+        <div class="card reg-card">
+          <div class="reg-head">
+            <div>
+              <h3>HyperLogLog registers <span style="font-weight:500;color:var(--text-3);font-size:12.5px">(actual 1,024 registers)</span></h3>
+              <p>Each cell = one register. Value 0 = never updated. Higher value = longer run of zeros observed.</p>
+            </div>
+            <span class="badge" id="regBadge">m = 1,024 · p = 10</span>
+          </div>
+          <div class="reg-grid" id="regGrid" role="img" aria-label="Grid of 1024 HyperLogLog registers"></div>
+          <div class="legend">
+            <span>Register value:</span>
+            <span class="swatches" aria-hidden="true">
+              <span class="sw" style="background:#EEF1F5"></span>
+              <span class="sw" style="background:#D6E4F0"></span>
+              <span class="sw" style="background:#A9C6E2"></span>
+              <span class="sw" style="background:#6FA0CC"></span>
+              <span class="sw" style="background:#4169A1"></span>
+              <span class="sw" style="background:#2F4F7A"></span>
+            </span>
+            <span>0 (empty) → high</span>
+            <span style="margin-left:auto;color:var(--text-3)">Hover a cell for details</span>
+          </div>
+          <div class="worked" id="workedExample">
+            <strong>Worked example:</strong> run the simulation to see how one visitor ID is hashed into a register.
+          </div>
+        </div>
+
+        <div>
+          <div class="reg-stats">
+            <div class="reg-stat"><div class="k">Non-zero registers</div><div class="v" id="rsNonZero">—</div><div class="d">registers updated at least once</div></div>
+            <div class="reg-stat"><div class="k">Zero registers (V)</div><div class="v" id="rsZero">—</div><div class="d">used in the small-range correction</div></div>
+            <div class="reg-stat"><div class="k">Maximum register value</div><div class="v" id="rsMax">—</div><div class="d">longest zero-run observed</div></div>
+            <div class="reg-stat"><div class="k">Average register value</div><div class="v" id="rsAvg">—</div><div class="d">mean across all 1,024 registers</div></div>
+          </div>
+          <div class="reg-explain" style="margin-top:10px">
+            HyperLogLog hashes each visitor ID and updates a register based on the observed pattern. Registers retain compact statistical information rather than storing the original visitor IDs.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. How it works -->
+  <section id="how-it-works">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="section-num">Concept</span>
+        <h2>How it works — three steps</h2>
+        <p>Every visitor event goes through the same three steps. No visitor ID is ever stored.</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <h3>Hash</h3>
+          <p>Each visitor ID is transformed into a binary hash.</p>
+          <div class="diagram">
+            <div class="mono" id="stepHashEx">visitor-0042 → 64-bit hash</div>
+            <div style="margin-top:4px">A good hash spreads IDs uniformly at random over all bit patterns.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <h3>Register</h3>
+          <p>The hash is used to select a register and determine the relevant pattern.</p>
+          <div class="diagram">
+            <div class="mono" id="stepRegEx">top 10 bits → register index (0–1023)<br>next bits → count leading zeros (ρ)</div>
+            <div style="margin-top:4px">The register keeps the <strong>maximum</strong> ρ seen so far.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <h3>Estimate</h3>
+          <p>The information stored in registers is combined to estimate the total number of unique visitors.</p>
+          <div class="diagram">
+            <div class="mono">Ê = α<sub>m</sub> · m² / Σ 2<sup>−M[j]</sup></div>
+            <div style="margin-top:4px">Registers with larger values contribute less — they signal a larger cardinality.</div>
+          </div>
+        </div>
+      </div>
+      <p class="arrow-note">Hash → Register → Estimate &nbsp;·&nbsp; repeated for every event in the stream</p>
+    </div>
+  </section>
+
+  <!-- 5. Probability & Statistics -->
+  <section id="probability">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="section-num">The mathematics</span>
+        <h2>Probability &amp; Statistics connection</h2>
+        <p>HyperLogLog works because of a simple probabilistic fact about random bit patterns.</p>
+      </div>
+      <div class="prob-layout">
+        <div class="card prob-card">
+          <h3>Why registers can estimate cardinality</h3>
+          <ul>
+            <li><span><strong>Longer zero-runs are rarer.</strong> For a uniformly random hash, the probability that the first <em>k</em> bits are all zero is (1/2)<sup>k</sup>. A run of 5 zeros is about 32× less likely than a run of 0 zeros.</span></li>
+            <li><span><strong>Registers capture the longest runs.</strong> Each register stores the maximum ρ (leading-zero count) seen for its share of hashes. The distribution of these maxima across 1,024 registers encodes how many distinct hashes were seen.</span></li>
+            <li><span><strong>More distinct visitors → larger register values.</strong> With few visitors, most registers stay at 0. As more unique visitors arrive, registers fill in and their values grow — and the estimator inverts this relationship to recover the count.</span></li>
+            <li><span><strong>Error shrinks with more registers.</strong> Averaging over <em>m</em> registers reduces variance, which is why the standard error falls as 1/√<em>m</em>.</span></li>
+          </ul>
+        </div>
+        <div class="formula-panel">
+          <div class="fp-label">Relative standard error</div>
+          <div class="formula">
+            <span>σ ≈</span>
+            <span class="frac"><span class="top">1.04</span><span class="bot">√m</span></span>
+          </div>
+          <p>Under the standard assumptions of HyperLogLog, the relative standard error is approximately 1.04 divided by the square root of the number of registers.</p>
+          <div class="fp-result">
+            For <strong>m = 1,024</strong>: &nbsp; σ ≈ 1.04 / √1024 ≈ <strong>3.25%</strong>
+          </div>
+          <p class="fp-note">This is a standard error — a typical size of deviation — not an absolute guarantee or a strict maximum error. Individual runs can be somewhat better or worse.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. Results -->
+  <section id="results">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="section-num">Latest run</span>
+        <h2>Results</h2>
+        <p>Comparison from the most recent simulation above. Run the simulator again to refresh these numbers.</p>
+      </div>
+      <div class="results-layout">
+        <div class="card result-card">
+          <h3>Exact vs. estimated unique visitors</h3>
+          <div class="bar-row">
+            <div class="bar-label"><span class="bl-k">Exact (set-based count)</span><span class="bl-v" id="barExactVal">—</span></div>
+            <div class="bar-track"><div class="bar-fill bar-exact" id="barExact" style="width:0%"></div></div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-label"><span class="bl-k">HyperLogLog estimate</span><span class="bl-v" id="barEstVal">—</span></div>
+            <div class="bar-track"><div class="bar-fill bar-est" id="barEst" style="width:0%"></div></div>
+          </div>
+          <p style="font-size:12.5px;color:var(--text-3)">Bars are scaled to the larger of the two values so the difference is visible. Both values come from the same simulated stream.</p>
+          <div class="memory-compare" id="memoryCompare">Run the simulation to see the memory comparison.</div>
+        </div>
+        <div class="card result-card">
+          <h3>Run summary</h3>
+          <table class="result-table">
+            <thead><tr><th>Measure</th><th>Value</th></tr></thead>
+            <tbody>
+              <tr><td>Total events in stream</td><td id="tTotal">—</td></tr>
+              <tr><td>Actual unique count (exact)</td><td id="tExact">—</td></tr>
+              <tr><td>Estimated unique count</td><td id="tEst">—</td></tr>
+              <tr><td>Relative error</td><td id="tError">—</td></tr>
+              <tr><td>Register memory (HLL)</td><td id="tMemory">—</td></tr>
+              <tr><td>Memory to store all unique IDs</td><td id="tNaive">—</td></tr>
+            </tbody>
+          </table>
+          <p style="font-size:12.5px;color:var(--text-3);margin-top:12px">“Store all unique IDs” is computed from the actual ID strings in the set (sum of their byte lengths), so it grows with the number of unique visitors — unlike the fixed 1 KB register memory.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. Limitations -->
+  <section id="limitations">
+    <div class="wrap">
+      <div class="card limit-card">
+        <h3>What StreamCount cannot do</h3>
+        <ul class="limit-grid">
+          <li>It provides an estimate, not an exact count.</li>
+          <li>It cannot identify individual visitors.</li>
+          <li>Accuracy depends on the algorithm's assumptions and configuration.</li>
+          <li>It is not suitable where an exact count is required.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap footer-inner">
+    <div>
+      <div class="footer-brand">StreamCount</div>
+      <div class="footer-meta">Probability &amp; Statistics Project · JG University</div>
+    </div>
+    <div class="footer-note">HyperLogLog demo · m = 1,024 registers · Runs entirely in the browser</div>
+  </div>
+</footer>
+
+<script>
+"use strict";
+/* ============================================================
+   HyperLogLog implementation (actual algorithm, not faked)
+   - m = 1024 registers (p = 10)
+   - 64-bit hash via FNV-1a + splitmix64 finalizer (BigInt)
+   - Standard estimator with small-range correction
+   ============================================================ */
+const HLL_P = 10;
+const HLL_M = 1 << HLL_P; // 1024
+const MASK64 = (1n << 64n) - 1n;
+
+function hash64(str) {
+  // FNV-1a 64-bit over the string, then splitmix64 avalanche finalizer.
+  let h = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  for (let i = 0; i < str.length; i++) {
+    h ^= BigInt(str.charCodeAt(i) & 0xff);
+    h = (h * prime) & MASK64;
+  }
+  // splitmix64 finalizer for good bit avalanche / uniformity
+  h ^= h >> 30n; h = (h * 0xbf58476d1ce4e5b9n) & MASK64;
+  h ^= h >> 27n; h = (h * 0x94d049bb133111ebn) & MASK64;
+  h ^= h >> 31n;
+  return h & MASK64;
+}
+
+function alphaM(m) {
+  if (m === 16) return 0.673;
+  if (m === 32) return 0.697;
+  if (m === 64) return 0.709;
+  return 0.7213 / (1 + 1.079 / m);
+}
+
+class HyperLogLog {
+  constructor(p) {
+    this.p = p;
+    this.m = 1 << p;
+    this.registers = new Uint8Array(this.m);
+    this.alpha = alphaM(this.m);
+    this.count = 0;
+  }
+  add(str) {
+    const h = hash64(str);
+    // register index = top p bits
+    const idx = Number(h >> BigInt(64 - this.p));
+    // w = remaining 64-p bits, left-aligned for leading-zero count
+    const w = (h << BigInt(this.p)) & MASK64;
+    // rho = 1 + number of leading zeros in the (64-p)-bit window
+    let rho;
+    if (w === 0n) {
+      rho = 64 - this.p + 1;
+    } else {
+      // count leading zeros in 64-bit w, then subtract p (the shifted-in zeros)
+      let lz = 0;
+      // unrolled via bit length: find position of highest set bit
+      // w > 0, so 64 - bitLength = leading zeros
+      // w is left-aligned: its leading zeros are exactly the leading zeros
+      // of the remaining (64-p)-bit window, so rho = 1 + leadingZeros(w)
+      const bitLen = w.toString(2).length; // 1..64
+      lz = 64 - bitLen;
+      rho = lz + 1;
+    }
+    if (rho > this.registers[idx]) this.registers[idx] = rho;
+    this.count++;
+  }
+  estimate() {
+    const m = this.m;
+    let sum = 0;
+    let zeros = 0;
+    for (let j = 0; j < m; j++) {
+      const v = this.registers[j];
+      if (v === 0) zeros++;
+      sum += Math.pow(2, -v);
+    }
+    let est = this.alpha * m * m / sum;
+    // Small-range correction (linear counting)
+    if (est <= 2.5 * m && zeros > 0) {
+      est = m * Math.log(m / zeros);
+    }
+    // Large-range correction for 64-bit hashes (threshold is astronomically large;
+    // included for completeness — it will not trigger in this demo's range)
+    const largeThreshold = Math.pow(2, 64) / 30;
+    if (est > largeThreshold) {
+      est = -Math.pow(2, 64) * Math.log(1 - est / Math.pow(2, 64));
+    }
+    return est;
+  }
+  memoryBytes() {
+    // 1 byte per register in this implementation
+    return this.m * 1;
+  }
+}
+
+/* ============================================================
+   Simulator
+   ============================================================ */
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => Math.round(n).toLocaleString("en-IN");
+const fmt2 = (n) => n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+
+const eventsRange = $("eventsRange"), eventsNumber = $("eventsNumber");
+const repeatRange = $("repeatRange");
+const eventsOut = $("eventsOut"), repeatOut = $("repeatOut");
+
+function syncEvents(from) {
+  let v = parseInt(from === "range" ? eventsRange.value : eventsNumber.value, 10);
+  if (isNaN(v)) v = 10000;
+  v = Math.min(100000, Math.max(100, v));
+  eventsRange.value = v;
+  eventsNumber.value = v;
+  eventsOut.textContent = fmt(v);
+}
+eventsRange.addEventListener("input", () => syncEvents("range"));
+eventsNumber.addEventListener("change", () => syncEvents("number"));
+eventsNumber.addEventListener("input", () => {
+  const v = parseInt(eventsNumber.value, 10);
+  if (Number.isFinite(v) && v >= 100 && v <= 100000) {
+    eventsRange.value = v;
+    eventsOut.textContent = fmt(v);
+  }
+});
+repeatRange.addEventListener("input", () => {
+  repeatOut.textContent = repeatRange.value + "%";
+  document.querySelectorAll(".preset").forEach(b => b.classList.remove("active"));
+});
+document.querySelectorAll(".preset").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".preset").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    eventsRange.value = btn.dataset.events;
+    eventsNumber.value = btn.dataset.events;
+    repeatRange.value = btn.dataset.repeat;
+    syncEvents("range");
+    repeatOut.textContent = btn.dataset.repeat + "%";
+    runSimulation();
+  });
+});
+
+function showError(msg) {
+  const box = $("errorBox");
+  box.textContent = msg;
+  box.classList.add("show");
+  $("okBox").classList.remove("show");
+}
+function showOk(msg) {
+  const box = $("okBox");
+  box.textContent = msg;
+  box.classList.add("show");
+  $("errorBox").classList.remove("show");
+}
+function clearMessages() {
+  $("errorBox").classList.remove("show");
+  $("okBox").classList.remove("show");
+}
+
+function registerColor(v) {
+  // subtle blue scale: 0 -> light gray, higher -> deeper blue
+  if (v === 0) return "#EEF1F5";
+  if (v === 1) return "#D6E4F0";
+  if (v === 2) return "#A9C6E2";
+  if (v <= 4) return "#6FA0CC";
+  if (v <= 7) return "#4169A1";
+  return "#2F4F7A";
+}
+
+function renderRegisters(hll, firstExample) {
+  const grid = $("regGrid");
+  // Build once, update in place for performance
+  if (grid.childElementCount !== HLL_M) {
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < HLL_M; i++) {
+      const cell = document.createElement("div");
+      cell.className = "reg-cell";
+      cell.dataset.idx = i;
+      frag.appendChild(cell);
+    }
+    grid.innerHTML = "";
+    grid.appendChild(frag);
+  }
+  const cells = grid.children;
+  let nonZero = 0, max = 0, sum = 0;
+  for (let i = 0; i < HLL_M; i++) {
+    const v = hll.registers[i];
+    const cell = cells[i];
+    cell.style.background = registerColor(v);
+    cell.title = "Register " + i + " = " + v;
+    if (v > 0) nonZero++;
+    if (v > max) max = v;
+    sum += v;
+  }
+  $("rsNonZero").textContent = fmt(nonZero) + " / 1,024";
+  $("rsZero").textContent = fmt(HLL_M - nonZero);
+  $("rsMax").textContent = max;
+  $("rsAvg").textContent = (sum / HLL_M).toFixed(2);
+
+  if (firstExample) {
+    const { id, hash, idx, rho } = firstExample;
+    const hex = hash.toString(16).padStart(16, "0");
+    $("workedExample").innerHTML =
+      "<strong>Worked example:</strong> visitor <span class=\"mono\">" + id + "</span> → hash <span class=\"mono\">0x" + hex + "</span> → top 10 bits select <strong>register " + idx + "</strong>, leading-zero count ρ = <strong>" + rho + "</strong>. That register keeps the maximum ρ seen so far.";
+    $("stepHashEx").textContent = id + " → 0x" + hex.slice(0, 10) + "…";
+    $("stepRegEx").innerHTML = "top 10 bits → register <strong>" + idx + "</strong><br>leading zeros ρ = <strong>" + rho + "</strong>";
+  }
+}
+
+function runSimulation() {
+  clearMessages();
+  const totalEvents = parseInt(eventsNumber.value, 10);
+  const repeatPct = parseInt(repeatRange.value, 10);
+
+  if (!Number.isFinite(totalEvents) || totalEvents < 100 || totalEvents > 100000) {
+    showError("Please enter a total number of events between 100 and 100,000.");
+    return;
+  }
+  if (!Number.isFinite(repeatPct) || repeatPct < 0 || repeatPct > 90) {
+    showError("Please choose a repeat-visitor percentage between 0% and 90%.");
+    return;
+  }
+
+  const runBtn = $("runBtn");
+  runBtn.disabled = true;
+  runBtn.textContent = "Running…";
+  $("runMeta").textContent = "Generating stream and updating 1,024 registers…";
+
+  // Use setTimeout so the button state paints before the (fast) computation
+  setTimeout(() => {
+    try {
+      const uniqueTarget = Math.max(1, Math.round(totalEvents * (1 - repeatPct / 100)));
+      const repeatCount = totalEvents - uniqueTarget;
+
+      // Build the pool of unique visitor IDs
+      const pool = [];
+      for (let i = 0; i < uniqueTarget; i++) {
+        pool.push("visitor-" + String(i + 1).padStart(5, "0"));
+      }
+      // Build the stream: all uniques + repeats drawn uniformly from the pool, then shuffle
+      const stream = pool.slice();
+      for (let i = 0; i < repeatCount; i++) {
+        stream.push(pool[Math.floor(Math.random() * pool.length)]);
+      }
+      // Fisher–Yates shuffle
+      for (let i = stream.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = stream[i]; stream[i] = stream[j]; stream[j] = tmp;
+      }
+
+      // Exact count via Set
+      const exactSet = new Set(stream);
+      const exact = exactSet.size;
+
+      // HyperLogLog estimate (actual algorithm)
+      const hll = new HyperLogLog(HLL_P);
+      let firstExample = null;
+      for (let i = 0; i < stream.length; i++) {
+        const id = stream[i];
+        if (i === 0) {
+          const h = hash64(id);
+          const idx = Number(h >> BigInt(64 - HLL_P));
+          const w = (h << BigInt(HLL_P)) & MASK64;
+          let rho;
+          if (w === 0n) rho = 64 - HLL_P + 1;
+          else { const lz = 64 - w.toString(2).length; rho = lz + 1; }
+          firstExample = { id, hash: h, idx, rho };
+        }
+        hll.add(id);
+      }
+      const estimate = hll.estimate();
+      const errorPct = exact > 0 ? Math.abs(estimate - exact) / exact * 100 : 0;
+      const memBytes = hll.memoryBytes();
+
+      // Naive memory: actual byte length of stored unique ID strings
+      let naiveBytes = 0;
+      exactSet.forEach(id => { naiveBytes += new TextEncoder().encode(id).length; });
+
+      // --- Update dashboard ---
+      $("mTotal").textContent = fmt(totalEvents);
+      $("mExact").textContent = fmt(exact);
+      $("mEst").textContent = fmt(estimate);
+      const errEl = $("mError");
+      errEl.textContent = errorPct.toFixed(2) + "%";
+      errEl.className = "value " + (errorPct <= 5 ? "error-good" : errorPct <= 10 ? "error-warn" : "");
+      $("mMemory").innerHTML = fmt(memBytes) + ' <small>bytes · ' + (memBytes / 1024).toFixed(2) + ' KB</small>';
+
+      // Stream preview (first 18, mark repeats)
+      const seen = new Set();
+      const preview = $("streamPreview");
+      preview.innerHTML = "";
+      const frag = document.createDocumentFragment();
+      for (let i = 0; i < Math.min(18, stream.length); i++) {
+        const id = stream[i];
+        const chip = document.createElement("span");
+        chip.className = "chip" + (seen.has(id) ? " repeat" : "");
+        chip.textContent = id + (seen.has(id) ? " ↻" : "");
+        seen.add(id);
+        frag.appendChild(chip);
+      }
+      preview.appendChild(frag);
+
+      // Registers
+      renderRegisters(hll, firstExample);
+
+      // Results section
+      const maxVal = Math.max(exact, estimate, 1);
+      $("barExactVal").textContent = fmt(exact);
+      $("barEstVal").textContent = fmt(estimate);
+      $("barExact").style.width = (exact / maxVal * 100).toFixed(1) + "%";
+      $("barEst").style.width = (estimate / maxVal * 100).toFixed(1) + "%";
+      $("tTotal").textContent = fmt(totalEvents);
+      $("tExact").textContent = fmt(exact);
+      $("tEst").textContent = fmt(estimate);
+      $("tError").textContent = errorPct.toFixed(2) + "%";
+      $("tMemory").textContent = fmt(memBytes) + " bytes (" + (memBytes / 1024).toFixed(2) + " KB)";
+      $("tNaive").textContent = fmt(naiveBytes) + " bytes (" + (naiveBytes / 1024).toFixed(2) + " KB)";
+      const ratio = naiveBytes > 0 ? (naiveBytes / memBytes).toFixed(1) : "—";
+      $("memoryCompare").innerHTML =
+        "HyperLogLog used <strong>" + fmt(memBytes) + " bytes</strong> of register memory, while storing every unique ID would take <strong>" + fmt(naiveBytes) + " bytes</strong> — about <strong>" + ratio + "× more</strong> for this stream. The register memory stays fixed at 1 KB no matter how large the stream grows.";
+
+      $("runMeta").textContent = "Last run: " + new Date().toLocaleTimeString("en-IN") + " · " + fmt(totalEvents) + " events · " + fmt(exact) + " unique";
+      showOk("Simulation complete — exact count from a set, estimate from 1,024 HyperLogLog registers. Error " + errorPct.toFixed(2) + "% (expected ≈ 3.25%).");
+    } catch (err) {
+      console.error(err);
+      showError("The simulation could not complete (" + (err && err.message ? err.message : "unknown error") + "). Please try again with fewer events.");
+    } finally {
+      runBtn.disabled = false;
+      runBtn.innerHTML = "▶&nbsp; Run Simulation";
+    }
+  }, 30);
+}
+
+$("runBtn").addEventListener("click", runSimulation);
+
+// Initial state + auto-run so the page is presentation-ready on load
+syncEvents("range");
+repeatOut.textContent = repeatRange.value + "%";
+runSimulation();
+</script>
+</body>
+</html>
